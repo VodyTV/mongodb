@@ -164,7 +164,7 @@ defmodule Mongo do
     wv_query = %Query{action: :wire_version}
 
     with {:ok, conn, _, _} <- select_server(topology_pid, :read, opts),
-         {:ok, version} <- DBConnection.execute(conn, wv_query, [], defaults(opts)) do
+         {:ok, _query, version} <- DBConnection.execute(conn, wv_query, [], defaults(opts)) do
       cursor? = version >= 1 and Keyword.get(opts, :use_cursor, true)
       opts = Keyword.drop(opts, ~w(allow_disk_use max_time use_cursor)a)
 
@@ -531,7 +531,7 @@ defmodule Mongo do
   @doc false
   def kill_cursors(conn, cursor_ids, opts) do
     query = %Query{action: :kill_cursors, extra: cursor_ids}
-    with {:ok, :ok} <- DBConnection.execute(conn, query, [], defaults(opts)),
+    with {:ok, _query,:ok} <- DBConnection.execute(conn, query, [], defaults(opts)),
          do: :ok
   end
 
@@ -555,7 +555,7 @@ defmodule Mongo do
     params = [query]
     query = %Query{action: :command}
 
-    with {:ok, reply} <- DBConnection.execute(conn, query, params,
+    with {:ok, _query, reply} <- DBConnection.execute(conn, query, params,
                                               defaults(opts)) do
       case reply do
         op_reply(flags: flags, docs: [%{"$err" => reason, "code" => code}])
@@ -600,7 +600,7 @@ defmodule Mongo do
     params = [doc]
     query = %Query{action: :insert_one, extra: coll}
     with {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
-         {:ok, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
+         {:ok, _query, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
          :ok <- maybe_failure(reply),
          {:ok, _doc} <- get_last_error(reply),
          do: {:ok, %Mongo.InsertOneResult{inserted_id: id}}
@@ -644,7 +644,7 @@ defmodule Mongo do
     params = docs
     query = %Query{action: :insert_many, extra: coll}
     with {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
-         {:ok, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
+         {:ok, _query, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
          :ok <- maybe_failure(reply),
          {:ok, _doc} <- get_last_error(reply),
          ids = index_map(ids, 0, %{}),
@@ -667,7 +667,7 @@ defmodule Mongo do
     params = [filter]
     query = %Query{action: :delete_one, extra: coll}
     with {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
-         {:ok, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
+         {:ok, _query, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
          :ok <- maybe_failure(reply),
          {:ok, %{"n" => n}} <- get_last_error(reply),
          do: {:ok, %Mongo.DeleteResult{deleted_count: n}}
@@ -689,7 +689,7 @@ defmodule Mongo do
     params = [filter]
     query = %Query{action: :delete_many, extra: coll}
     with {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
-         {:ok, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
+         {:ok, _query, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
          :ok <- maybe_failure(reply),
          {:ok, %{"n" => n}} <- get_last_error(reply),
          do: {:ok, %Mongo.DeleteResult{deleted_count: n}}
@@ -718,7 +718,7 @@ defmodule Mongo do
     params = [filter, replacement]
     query = %Query{action: :replace_one, extra: coll}
     with {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
-         {:ok, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
+         {:ok, _query, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
          :ok <- maybe_failure(reply),
          {:ok, doc} <- get_last_error(reply) do
       case doc do
@@ -764,7 +764,7 @@ defmodule Mongo do
     params = [filter, update]
     query = %Query{action: :update_one, extra: coll}
     with {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
-         {:ok, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
+         {:ok, _query, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
          :ok <- maybe_failure(reply),
          {:ok, doc} <- get_last_error(reply) do
       case doc do
@@ -803,7 +803,7 @@ defmodule Mongo do
     params = [filter, update]
     query = %Query{action: :update_many, extra: coll}
     with {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
-         {:ok, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
+         {:ok, _query, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
          :ok <- maybe_failure(reply),
          {:ok, doc} <- get_last_error(reply) do
       case doc do
