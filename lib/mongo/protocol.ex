@@ -36,7 +36,8 @@ defmodule Mongo.Protocol do
       auth_mechanism: opts[:auth_mechanism] || nil,
       connection_type: Keyword.fetch!(opts, :connection_type),
       topology_pid: Keyword.fetch!(opts, :topology_pid),
-      ssl: opts[:ssl] || false
+      ssl: opts[:ssl] || false,
+      status: :idle
     }
 
     connect(opts, s)
@@ -139,6 +140,7 @@ defmodule Mongo.Protocol do
     end
   end
 
+
   def handle_info({:tcp, data}, s) do
     err = Mongo.Error.exception(message: "unexpected async recv: #{inspect data}")
     {:disconnect, err, s}
@@ -157,6 +159,11 @@ defmodule Mongo.Protocol do
   def handle_info({:ssl_closed, _}, s) do
     err = Mongo.Error.exception(tag: :ssl, action: "async recv", reason: :closed, host: s.host)
     {:disconnect, err, s}
+  end
+
+  def handle_status(_, %{status: status} = state) do
+    {status, state}
+
   end
 
   def checkout(%{socket: {mod, sock}} = s) do
@@ -194,13 +201,13 @@ defmodule Mongo.Protocol do
     handle_execute(query, params, opts, s)
   end
 
-  def handle_execute(%Mongo.Query{action: action, extra: extra}, params, opts, original_state) do
+  def handle_execute(%Mongo.Query{action: action, extra: extra} = query, params, opts, original_state) do
     {mod, sock} = original_state.socket
     :ok = setopts(mod, sock, active: false)
     tmp_state = %{original_state | database: Keyword.get(opts, :database, original_state.database)}
     with {:ok, reply, tmp_state} <- handle_execute(action, extra, params, opts, tmp_state) do
       :ok = setopts(mod, sock, active: :once)
-      {:ok, reply, Map.put(tmp_state, :database, original_state.database)}
+      {:ok, query, reply, Map.put(tmp_state, :database, original_state.database)}
     end
   end
 
