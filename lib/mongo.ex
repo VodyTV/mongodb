@@ -567,10 +567,7 @@ defmodule Mongo do
 
     opts = Keyword.drop(opts, [:batch_size])
 
-    with {:ok, %{"cursor" => %{"id" => id, "nextBatch" => docs}}} <-
-           direct_command(conn, query, opts) do
-      {:ok, %{from: 0, num: Enum.count(docs), cursor_id: id, docs: docs}}
-    end
+    direct_command(conn, query, opts)
   end
 
   @doc false
