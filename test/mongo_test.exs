@@ -176,9 +176,6 @@ defmodule Mongo.Test do
     assert [%{"foo" => 42}, %{"foo" => 43}, %{"foo" => 44}] =
              c.pid |> Mongo.find(coll, %{}) |> Enum.to_list()
 
-    # Mongo is weird with batch_size=1
-    assert [%{"foo" => 42}] = c.pid |> Mongo.find(coll, %{}, batch_size: 1) |> Enum.to_list()
-
     assert [%{"foo" => 42}, %{"foo" => 43}, %{"foo" => 44}] =
              c.pid |> Mongo.find(coll, %{}, batch_size: 2) |> Enum.to_list()
 
