@@ -160,12 +160,10 @@ defmodule Mongo.AggregationCursor do
     end
 
     defp start_fun(conn, coll, query, projector, opts) do
-      opts = Keyword.put(opts, :batch_size, 2)
+      opts = Keyword.put(opts, :batch_size, -1)
 
       fn ->
-        case Mongo.old_raw_find(conn, "content", query, projector, opts) do
-          {:ok, thing} ->
-            IO.inspect(thing)
+        case Mongo.legacy_raw_find(conn, coll, query, projector, opts) do
           {:ok,
            %{
              cursor_id: 0,
@@ -210,7 +208,7 @@ defmodule Mongo.AggregationCursor do
           :ok
 
         state(cursor: cursor, conn: conn) ->
-          Mongo.kill_cursors(conn, [cursor], opts)
+          Mongo.legacy_kill_cursors(conn, [cursor], opts)
       end
     end
 
