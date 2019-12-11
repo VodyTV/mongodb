@@ -583,14 +583,6 @@ defmodule Mongo do
   def kill_cursors(conn, cursor_ids, opts) do
     query = %Query{action: :kill_cursors, extra: cursor_ids}
 
-    direct_command(conn, query, opts)
-    :ok
-  end
-
-  @doc false
-  def legacy_kill_cursors(conn, cursor_ids, opts) do
-    query = %Query{action: :kill_cursors, extra: cursor_ids}
-
     with {:ok, _query, :ok} <- DBConnection.execute(conn, query, [], defaults(opts)),
          do: :ok
   end

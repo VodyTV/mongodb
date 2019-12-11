@@ -79,7 +79,7 @@ defmodule Mongo.ConnectionTest do
     {:ok, conn, _, _} = Mongo.select_server(pid, :read)
 
     assert {:ok, %{docs: [%{"ok" => 1.0}]}} =
-             Mongo.raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
+             Mongo.legacy_raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
   end
 
   @tag :ssl
@@ -88,7 +88,7 @@ defmodule Mongo.ConnectionTest do
     {:ok, conn, _, _} = Mongo.select_server(pid, :read)
 
     assert {:ok, %{docs: [%{"ok" => 1.0}]}} =
-             Mongo.raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
+             Mongo.legacy_raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
   end
 
   test "auth" do
@@ -96,7 +96,7 @@ defmodule Mongo.ConnectionTest do
     {:ok, conn, _, _} = Mongo.select_server(pid, :read)
 
     assert {:ok, %{docs: [%{"ok" => 1.0}]}} =
-             Mongo.raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
+             Mongo.legacy_raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
   end
 
   test "auth on db" do
@@ -104,7 +104,7 @@ defmodule Mongo.ConnectionTest do
     {:ok, conn, _, _} = Mongo.select_server(pid, :read)
 
     assert {:ok, %{docs: [%{"ok" => 1.0}]}} =
-             Mongo.raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
+             Mongo.legacy_raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
   end
 
   test "auth wrong" do
@@ -201,7 +201,7 @@ defmodule Mongo.ConnectionTest do
     assert {:ok, _} = Mongo.insert_one(pid, coll, %{foo: 44}, [])
 
     assert {:ok, %{cursor_id: cursor_id, num: 2}} =
-             Mongo.raw_find(conn, coll, %{}, nil, batch_size: 2)
+             Mongo.legacy_raw_find(conn, coll, %{}, nil, batch_size: 2)
 
     assert :ok = Mongo.kill_cursors(conn, [cursor_id], [])
 
@@ -248,7 +248,7 @@ defmodule Mongo.ConnectionTest do
     {:ok, conn, _, _} = Mongo.select_server(pid, :read)
 
     assert {:ok, %{docs: [%{"ok" => 1.0}]}} =
-             Mongo.raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
+             Mongo.legacy_raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
   end
 
   @tag :socket
@@ -257,6 +257,6 @@ defmodule Mongo.ConnectionTest do
     {:ok, conn, _, _} = Mongo.select_server(pid, :read)
 
     assert {:ok, %{docs: [%{"ok" => 1.0}]}} =
-             Mongo.raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
+             Mongo.legacy_raw_find(conn, "$cmd", %{ping: 1}, %{}, batch_size: 1)
   end
 end
