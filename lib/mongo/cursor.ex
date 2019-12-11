@@ -208,7 +208,7 @@ defmodule Mongo.AggregationCursor do
           :ok
 
         state(cursor: cursor, conn: conn) ->
-          Mongo.legacy_kill_cursors(conn, [cursor], opts)
+          Mongo.kill_cursors(conn, [cursor], opts)
       end
     end
 
