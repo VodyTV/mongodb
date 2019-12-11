@@ -566,11 +566,25 @@ defmodule Mongo do
     ])
 
     opts = Keyword.drop(opts, [:skip, :batch_size])
-
+    IO.inspect(conn)
+    IO.inspect(coll)
+    IO.inspect(query)
+    IO.inspect(select)
+    IO.inspect(opts)
     with {:ok, %{"cursor" => %{"id" => id, "firstBatch" => docs}}} <-
            direct_command(conn, query, opts) do
       {:ok, %{from: 0, num: Enum.count(docs), cursor_id: id, docs: docs}}
     end
+  end
+
+  def old_raw_find(conn, coll, query, select, opts) do
+    params = [query, select]
+    query = %Query{action: :find, extra: coll}
+
+    with {:ok, _query, reply} <- DBConnection.execute(conn, query, params, defaults(opts)),
+         :ok <- maybe_failure(reply),
+         op_reply(docs: docs, cursor_id: cursor_id, from: from, num: num) = reply,
+         do: {:ok, %{from: from, num: num, cursor_id: cursor_id, docs: docs}}
   end
 
   @doc false
@@ -590,8 +604,9 @@ defmodule Mongo do
   def kill_cursors(conn, cursor_ids, opts) do
     query = %Query{action: :kill_cursors, extra: cursor_ids}
 
-    with {:ok, _query, :ok} <- DBConnection.execute(conn, query, [], defaults(opts)),
-         do: :ok
+    direct_command(conn, query, opts)
+    |> IO.inspect
+    :ok
   end
 
   @doc """
