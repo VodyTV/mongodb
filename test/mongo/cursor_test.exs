@@ -36,9 +36,7 @@ defmodule Mongo.CursorTest do
 
     docs = [%{name: "a"}, %{name: "b"}, %{name: "c"}]
     assert {:ok, _} = Mongo.insert_many(c.pid, coll, docs)
-#    assert [%{"name" => "b"}, %{"name" => "c"}] = Mongo.find(c.pid, coll, %{}, limit: 2, skip: 1) |> Enum.to_list
-#    assert [%{"name" => "b"}, %{"name" => "c"}] = Mongo.find(c.pid, coll, %{}, limit: 2, skip: 1)
-    assert true == Mongo.find(c.pid, coll, %{}, limit: 2, skip: 1)
+    assert [%{"name" => "b"}, %{"name" => "c"}] = Mongo.find(c.pid, coll, %{}, limit: 2, skip: 1) |> Enum.to_list
   end
 
   test "sort", c do
@@ -46,9 +44,6 @@ defmodule Mongo.CursorTest do
 
     docs = [%{name: "b"}, %{name: "a"}, %{name: "c"}]
     assert {:ok, _} = Mongo.insert_many(c.pid, coll, docs)
-#        assert [%{"name" => "c"}, %{"name" => "b"}, %{"name" => "a"}] = Mongo.find(c.pid, coll, %{}, [sort: %{name: -1}]) |> Enum.to_list
-#    assert [%{"name" => "c"}, %{"name" => "b"}, %{"name" => "a"}] = Mongo.find(c.pid, coll, %{}, [sort: %{name: -1}])
-#    assert true == Mongo.find(c.pid, coll, %{}, [sort: %{name: -1}])
-    assert true == Mongo.find(c.pid, coll, %{}, [sort: %{name: -1}])  |> Enum.to_list
+    assert [%{"name" => "c"}, %{"name" => "b"}, %{"name" => "a"}] = Mongo.find(c.pid, coll, %{}, [sort: %{name: -1}]) |> Enum.to_list
   end
 end
