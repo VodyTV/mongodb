@@ -5,6 +5,8 @@ defmodule Mongo.Protocol do
   use Mongo.Messages
   alias Mongo.Protocol.Utils
 
+  alias Mongo.ConfigHide
+
   @timeout 5000
   @find_flags ~w(tailable_cursor slave_ok no_cursor_timeout await_data exhaust allow_partial_results oplog_replay)a
   @find_one_flags ~w(slave_ok exhaust partial)a
@@ -12,9 +14,7 @@ defmodule Mongo.Protocol do
   @update_flags ~w(upsert)a
   @write_concern ~w(w j wtimeout)a
 
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
   def disconnect(_error, %{socket: {mod, sock}} = s) do
     notify_disconnect(s)
     mod.close(sock)
@@ -24,9 +24,7 @@ defmodule Mongo.Protocol do
     GenServer.cast(pid, {:disconnect, type, host})
   end
 
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
   def connect(opts) do
     {write_concern, opts} = Keyword.split(opts, @write_concern)
     write_concern = Keyword.put_new(write_concern, :w, 1)
@@ -43,10 +41,11 @@ defmodule Mongo.Protocol do
       connection_type: Keyword.fetch!(opts, :connection_type),
       topology_pid: Keyword.fetch!(opts, :topology_pid),
       ssl: opts[:ssl] || false,
-      status: :idle
+      status: :idle,
+      session: nil
     }
 
-    connect(opts, s)
+    connect(ConfigHide.unmask_password(opts), s)
   end
 
   defp connect(opts, s) do
@@ -172,44 +171,29 @@ defmodule Mongo.Protocol do
     end
   end
 
-  @doc """
-  DBConnection callback
-  """
-  def handle_begin(_opts, state) do
-    {:idle, state}
-  end
+  @impl DBConnection
+  def handle_begin(_opts, state), do: {:ok, nil, state}
 
-  @doc """
-  DBConnection callback
-  """
-  def handle_close(_query, _opts, state) do
-    {:ok, nil, state}
-  end
+  @impl DBConnection
+  def handle_commit(_opts, state), do: {:ok, nil, state}
 
-  @doc """
-  DBConnection callback
-  """
-  def handle_commit(_opts, state) do
-    {:idle, state}
-  end
+  @impl DBConnection
+  def handle_rollback(_opts, state), do: {:ok, nil, state}
 
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
+  def handle_close(_query, _opts, state), do: {:ok, nil, state}
+
+  @impl DBConnection
   def handle_deallocate(_query, _cursor, _opts, state) do
     {:ok, :ok, state}
   end
 
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
   def handle_declare(query, _params, _opts, state) do
     {:ok, query, :ok, state}
   end
 
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
   def checkout(%{socket: {mod, sock}} = s) do
     case setopts(mod, sock, active: false) do
       :ok -> recv_buffer(s)
@@ -237,9 +221,7 @@ defmodule Mongo.Protocol do
     end
   end
 
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
   def checkin(%{socket: {mod, sock}} = s) do
     :ok = setopts(mod, sock, active: :once)
     {:ok, s}
@@ -249,37 +231,22 @@ defmodule Mongo.Protocol do
     handle_execute(query, params, opts, s)
   end
 
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
   def handle_fetch(_query, _cursor, _opts, state) do
     {:cont, :ok, state}
   end
 
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
   def handle_prepare(query, _opts, state) do
     {:ok, query, state}
   end
 
-  @doc """
-  DBConnection callback
-  """
-  def handle_rollback(_opts, state) do
-    {:idle, state}
-  end
-
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
   def handle_status(_opts, state) do
     {:idle, state}
   end
 
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
   def handle_execute(
         %Mongo.Query{action: action, extra: extra} = query,
         params,
@@ -455,9 +422,7 @@ defmodule Mongo.Protocol do
     end
   end
 
-  @doc """
-  DBConnection callback
-  """
+  @impl DBConnection
   def ping(%{wire_version: wire_version, socket: {mod, sock}} = s) do
     {:ok, active} = getopts(mod, sock, [:active])
     :ok = setopts(mod, sock, active: false)

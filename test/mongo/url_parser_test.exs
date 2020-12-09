@@ -10,7 +10,9 @@ defmodule Mongo.UrlParserTest do
     end
 
     test "percent encoded password" do
-      url = "mongodb://myusername:2yPK%7DBzj%7CqE%28%24%5E1JDdk4J42%2A%264lLgV%25C@mymongodbserver:27017/admin"
+      url =
+        "mongodb://myusername:2yPK%7DBzj%7CqE%28%24%5E1JDdk4J42%2A%264lLgV%25C@mymongodbserver:27017/admin"
+
       opts = UrlParser.parse_url(url: url)
       password = Keyword.get(opts, :password)
       assert password = "2yPK}Bzj|qE($^1JDdk4J42*&4lLgV%C"
@@ -80,6 +82,19 @@ defmodule Mongo.UrlParserTest do
                  ]
                ]
       end
+    end
+
+    test "appName option" do
+      url = "mongodb://USERNAME:PASSWORD@HOST:PORT/DATABASE?ssl=true&replicaSet=globaldb&appName=APP"
+      assert UrlParser.parse_url(url: url) == [
+        username: "USERNAME",
+        password: "PASSWORD",
+        database: "DATABASE",
+        app_name: "APP",
+        set_name: "globaldb",
+        ssl: true,
+        seeds: ["HOST:PORT"]
+      ]
     end
   end
 end

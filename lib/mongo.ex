@@ -9,7 +9,7 @@ defmodule Mongo do
 
     * `:timeout` - The maximum time that the caller is allowed the to hold the
       connection’s state (ignored when using a run/transaction connection,
-      default: `15_000`)
+      default: `5_000`)
     * `:pool` - The pooling behaviour module to use, this option is required
       unless the default `DBConnection.Connection` pool is used
     * `:pool_timeout` - The maximum time to wait for a reply when making a
@@ -56,12 +56,14 @@ defmodule Mongo do
 
   @timeout 5000
 
-  @dialyzer [no_match: [count_documents!: 4]]
+  @dialyzer nowarn_function: [count_documents!: 4]
 
   @type conn :: DbConnection.Conn
   @type collection :: String.t()
   @opaque cursor :: Mongo.Cursor.t() | Mongo.AggregationCursor.t()
   @type result(t) :: :ok | {:ok, t} | {:error, Mongo.Error.t()}
+  @type write_result(t) ::
+          :ok | {:ok, t} | {:error, Mongo.Error.t()} | {:error, Mongo.WriteError.t()}
   @type result!(t) :: nil | t | no_return
 
   defmacrop bangify(result) do
@@ -134,11 +136,17 @@ defmodule Mongo do
   def start_link(opts) do
     opts
     |> UrlParser.parse_url()
+    |> Mongo.ConfigHide.mask_password()
     |> Topology.start_link()
   end
 
   def child_spec(opts, child_opts \\ []) do
-    Supervisor.Spec.worker(Mongo, [opts], child_opts)
+    child_opts
+    |> Map.new()
+    |> Map.merge(%{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]}
+    })
   end
 
   @doc """
@@ -162,17 +170,20 @@ defmodule Mongo do
   @spec aggregate(GenServer.server(), collection, [BSON.document()], Keyword.t()) :: cursor
   def aggregate(topology_pid, coll, pipeline, opts \\ []) do
     query =
-      filter_nils(
+      [
         aggregate: coll,
         pipeline: pipeline,
         allowDiskUse: opts[:allow_disk_use],
         collation: opts[:collation],
-        maxTimeMS: opts[:max_time]
-      )
+        maxTimeMS: opts[:max_time],
+        hint: opts[:hint]
+      ]
+      |> filter_nils()
 
     wv_query = %Query{action: :wire_version}
 
-    with {:ok, conn, _, _} <- select_server(topology_pid, :read, opts),
+    with {:ok, query} <- Mongo.Session.add_session(query, opts[:session]),
+         {:ok, conn, _, _} <- select_server(topology_pid, :read, opts),
          {:ok, _query, version} <- DBConnection.execute(conn, wv_query, [], defaults(opts)) do
       cursor? = version >= 1 and Keyword.get(opts, :use_cursor, true)
       opts = Keyword.drop(opts, ~w(allow_disk_use max_time use_cursor)a)
@@ -215,7 +226,7 @@ defmodule Mongo do
     _ = modifier_docs(update, :update)
 
     query =
-      filter_nils(
+      [
         findAndModify: coll,
         query: filter,
         update: update,
@@ -226,7 +237,8 @@ defmodule Mongo do
         sort: opts[:sort],
         upsert: opts[:upsert],
         collation: opts[:collation]
-      )
+      ]
+      |> filter_nils()
 
     opts =
       Keyword.drop(
@@ -234,7 +246,8 @@ defmodule Mongo do
         ~w(bypass_document_validation max_time projection return_document sort upsert collation)a
       )
 
-    with {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
+    with {:ok, query} <- Mongo.Session.add_session(query, opts[:session]),
+         {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
          {:ok, doc} <- direct_command(conn, query, opts),
          do: {:ok, doc["value"]}
   end
@@ -367,7 +380,7 @@ defmodule Mongo do
   def count_documents(topology_pid, coll, filter, opts \\ []) do
     pipeline =
       [
-        {"$match", filter},
+        {"$match", Map.new(filter)},
         {"$skip", opts[:skip]},
         {"$limit", opts[:limit]},
         {"$group", %{"_id" => nil, "n" => %{"$sum" => 1}}}
@@ -534,9 +547,12 @@ defmodule Mongo do
       |> Keyword.put(:limit, 1)
       |> Keyword.put(:batch_size, 1)
 
-    conn
-    |> find(coll, filter, opts)
-    |> Enum.at(0)
+    with [elem] <- Enum.to_list(find(conn, coll, filter, opts)) do
+      elem
+    else
+      [] -> nil
+      error -> error
+    end
   end
 
   @doc false
@@ -597,9 +613,10 @@ defmodule Mongo do
     rp = ReadPreference.defaults(%{mode: :primary})
     rp_opts = [read_preference: Keyword.get(opts, :read_preference, rp)]
 
-    with {:ok, conn, slave_ok, _} <- select_server(topology_pid, :read, rp_opts),
-         opts = Keyword.put(opts, :slave_ok, slave_ok),
-         do: direct_command(conn, query, opts)
+    with {:ok, conn, slave_ok, _} <- select_server(topology_pid, :read, rp_opts) do
+      opts = Keyword.put(opts, :slave_ok, slave_ok)
+      direct_command(conn, query, opts)
+    end
   end
 
   @doc false
@@ -622,6 +639,8 @@ defmodule Mongo do
           {:error, %Mongo.Error{message: "command failed: #{reason}", code: error["code"]}}
 
         op_reply(docs: [%{"ok" => ok} = doc]) when ok == 1 ->
+          Mongo.Session.update_session(doc, opts[:session])
+
           {:ok, doc}
 
         # TODO: Check if needed
@@ -650,7 +669,7 @@ defmodule Mongo do
       Mongo.insert_one(pid, "users", %{first_name: "John", last_name: "Smith"})
   """
   @spec insert_one(GenServer.server(), collection, BSON.document(), Keyword.t()) ::
-          result(Mongo.InsertOneResult.t())
+          write_result(Mongo.InsertOneResult.t())
   def insert_one(topology_pid, coll, doc, opts \\ []) do
     assert_single_doc!(doc)
     {[id], [doc]} = assign_ids([doc])
@@ -663,15 +682,17 @@ defmodule Mongo do
       })
 
     query =
-      filter_nils(
+      [
         insert: coll,
         documents: [doc],
         ordered: Keyword.get(opts, :ordered),
         writeConcern: write_concern,
         bypassDocumentValidation: Keyword.get(opts, :bypass_document_validation)
-      )
+      ]
+      |> filter_nils()
 
-    with {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
+    with {:ok, query} <- Mongo.Session.add_session(query, opts[:session]),
+         {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
          {:ok, doc} <- direct_command(conn, query, opts) do
       case doc do
         %{"writeErrors" => _} ->
@@ -718,7 +739,7 @@ defmodule Mongo do
       Mongo.insert_many(pid, "users", [%{first_name: "John", last_name: "Smith"}, %{first_name: "Jane", last_name: "Doe"}])
   """
   @spec insert_many(GenServer.server(), collection, [BSON.document()], Keyword.t()) ::
-          result(Mongo.InsertManyResult.t())
+          write_result(Mongo.InsertManyResult.t())
   def insert_many(topology_pid, coll, docs, opts \\ []) do
     assert_many_docs!(docs)
     {ids, docs} = assign_ids(docs)
@@ -771,7 +792,7 @@ defmodule Mongo do
   Remove a document matching the filter from the collection.
   """
   @spec delete_one(GenServer.server(), collection, BSON.document(), Keyword.t()) ::
-          result(Mongo.DeleteResult.t())
+          write_result(Mongo.DeleteResult.t())
   def delete_one(topology_pid, coll, filter, opts \\ []) do
     do_delete(topology_pid, coll, filter, 1, opts)
   end
@@ -789,7 +810,7 @@ defmodule Mongo do
   Remove all documents matching the filter from the collection.
   """
   @spec delete_many(GenServer.server(), collection, BSON.document(), Keyword.t()) ::
-          result(Mongo.DeleteResult.t())
+          write_result(Mongo.DeleteResult.t())
   def delete_many(topology_pid, coll, filter, opts \\ []) do
     do_delete(topology_pid, coll, filter, 0, opts)
   end
@@ -850,7 +871,7 @@ defmodule Mongo do
       matches the filter (default: `false`)
   """
   @spec replace_one(GenServer.server(), collection, BSON.document(), BSON.document(), Keyword.t()) ::
-          result(Mongo.UpdateResult.t())
+          write_result(Mongo.UpdateResult.t())
   def replace_one(topology_pid, coll, filter, replacement, opts \\ []) do
     _ = modifier_docs(replacement, :replace)
 
@@ -891,7 +912,7 @@ defmodule Mongo do
       matches the filter (default: `false`)
   """
   @spec update_one(GenServer.server(), collection, BSON.document(), BSON.document(), Keyword.t()) ::
-          result(Mongo.UpdateResult.t())
+          write_result(Mongo.UpdateResult.t())
   def update_one(topology_pid, coll, filter, update, opts \\ []) do
     _ = modifier_docs(update, :update)
 
@@ -920,7 +941,7 @@ defmodule Mongo do
       matches the filter (default: `false`)
   """
   @spec update_many(GenServer.server(), collection, BSON.document(), BSON.document(), Keyword.t()) ::
-          result(Mongo.UpdateResult.t())
+          write_result(Mongo.UpdateResult.t())
   def update_many(topology_pid, coll, filter, update, opts \\ []) do
     _ = modifier_docs(update, :update)
 
@@ -960,15 +981,17 @@ defmodule Mongo do
       )
 
     query =
-      filter_nils(
+      [
         update: coll,
         updates: [update],
         ordered: Keyword.get(opts, :ordered),
         writeConcern: write_concern,
         bypassDocumentValidation: Keyword.get(opts, :bypass_document_validation)
-      )
+      ]
+      |> filter_nils()
 
-    with {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
+    with {:ok, query} <- Mongo.Session.add_session(query, opts[:session]),
+         {:ok, conn, _, _} <- select_server(topology_pid, :write, opts),
          {:ok, doc} <- direct_command(conn, query, opts) do
       case doc do
         %{"writeErrors" => write_errors} ->
@@ -1028,7 +1051,44 @@ defmodule Mongo do
     end
   end
 
-  @doc false
+  @doc """
+  Start new session for given `topology_pid`.
+
+  ## Options
+
+  - `:causal_consistency` - whether the causal consistency should be persisted within
+    session. Default to `true`.
+  - `:read_concern` - what should be the level for read consistency in session. Should
+    be map with value `:level` that is one of the described in [*Read Concern*][rc]
+    documentation. Applied only when `:casual_consistency` is set to `true`. Bu default
+    uses cluster configuration.
+  - `:retry_writes` - whether retryable faliures should be retried. Defaults to `true`.
+
+  `:causal_consistency` can be set only during the session creation, but the `:read_concern`
+  can be set for each transaction independently.
+
+  [rc]: https://docs.mongodb.com/manual/reference/read-concern/index.html
+  """
+  @spec start_session(GenServer.server(), keyword()) ::
+          {:ok, Mongo.Session.session()} | {:error, term()}
+  def start_session(topology_pid, opts \\ []) do
+    Mongo.SessionPool.checkout(topology_pid, opts)
+  end
+
+  @spec with_session(GenServer.server(), (Mongo.Session.session() -> return)) :: return
+        when return: term()
+  @spec with_session(GenServer.server(), keyword(), (Mongo.Session.session() -> return)) :: return
+        when return: term()
+  def with_session(topology_pid, opts \\ [], func) do
+    with {:ok, pid} <- start_session(topology_pid, opts) do
+      try do
+        func.(pid)
+      after
+        Mongo.Session.end_session(pid)
+      end
+    end
+  end
+
   def select_server(topology_pid, type, opts \\ []) do
     with {:ok, servers, slave_ok, mongos?} <-
            select_servers(topology_pid, type, opts) do
@@ -1037,8 +1097,7 @@ defmodule Mongo do
       else
         with {:ok, connection} <-
                servers
-               |> Enum.take_random(1)
-               |> Enum.at(0)
+               |> Enum.random()
                |> get_connection(topology_pid) do
           {:ok, connection, slave_ok, mongos?}
         end
@@ -1066,8 +1125,9 @@ defmodule Mongo do
           {:ok, _servers} ->
             select_servers(topology_pid, type, opts, start_time)
 
-          {:error, :selection_timeout} = error ->
-            error
+          {:error, :selection_timeout} ->
+            {:error,
+             %Mongo.Error{type: :network, message: "Topology selection timeout", code: 89}}
         end
       else
         {:ok, servers, slave_ok, mongos?}
@@ -1169,10 +1229,15 @@ defmodule Mongo do
   defp assert_single_doc!([{_, _} | _]), do: :ok
 
   defp assert_single_doc!(other) do
-    raise ArgumentError, "expected single document, got: #{inspect(other)}"
+    unless Mongo.Encoder.impl_for(other),
+      do: raise(ArgumentError, "expected single document, got: #{inspect(other)}"),
+      else: :ok
   end
 
   defp assert_many_docs!([first | _]) when not is_tuple(first), do: :ok
+
+  defp assert_many_docs!(docs) when is_list(docs),
+    do: Enum.all?(docs, &assert_single_doc!/1) && :ok
 
   defp assert_many_docs!(other) do
     raise ArgumentError, "expected list of documents, got: #{inspect(other)}"
@@ -1184,6 +1249,7 @@ defmodule Mongo do
 
   defp assign_ids(list) when is_list(list) do
     list
+    |> Enum.map(&Mongo.Encoder.encode/1)
     |> Enum.map(&assign_id/1)
     |> Enum.unzip()
   end
